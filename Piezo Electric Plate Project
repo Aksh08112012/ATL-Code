@@ -1,0 +1,56 @@
+#include <Wire.h>
+#include <LiquidCrystal_I2C.h>
+
+LiquidCrystal_I2C lcd(0x27, 16, 2);
+
+// Define pins
+const int piezoPin = A0;
+const int ledPin = 8;        
+
+// Variables
+int carCount = 0;
+int threshold = 100;
+unsigned long lastDetection = 0;
+const unsigned long debounceTime = 500; // In ms
+
+void setup() {
+  pinMode(ledPin, OUTPUT);
+  lcd.init();
+  lcd.backlight();
+
+  // Initial display
+  lcd.setCursor(0, 0);
+  lcd.print("Toll Plaza Energy");
+  lcd.setCursor(0, 1);
+  lcd.print("System Initializing");
+  delay(3000);
+  lcd.clear();
+}
+
+void loop() {
+  int sensorValue = analogRead(piezoPin);
+
+  if (sensorValue > threshold && millis() - lastDetection > debounceTime) {
+    carCount++;
+    lastDetection = millis();
+
+    // LED ON
+    digitalWrite(ledPin, HIGH);
+
+    float voltage = sensorValue * (5.0 / 1023.0);
+    float energy = voltage * 0.001; 
+
+    // Display info
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("Cars: ");
+    lcd.print(carCount);
+    lcd.setCursor(0, 1);
+    lcd.print("Energy: ");
+    lcd.print(energy, 3);
+    lcd.print(" J");
+
+    delay(500); // Allow LED to be visible
+    digitalWrite(ledPin, LOW);
+  }
+}
