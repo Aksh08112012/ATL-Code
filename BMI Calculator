@@ -1,0 +1,169 @@
+#include <Wire.h>
+#include <LiquidCrystal_I2C.h>
+#include "HX711.h"
+
+// LCD
+LiquidCrystal_I2C lcd(0x27, 16, 2);
+
+// HX711 (Load Cell)
+HX711 scale;
+#define DOUT  3
+#define CLK   2
+
+// Ultrasonic
+#define TRIG 9
+#define ECHO 10
+
+float calibration_factor = -7050; // adjust this
+float total_height = 200.0; // cm (distance from sensor to ground)
+
+bool personPresent = false;
+
+// 📏 Get distance
+float getDistance() {
+  digitalWrite(TRIG, LOW);
+  delayMicroseconds(2);
+  digitalWrite(TRIG, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(TRIG, LOW);
+
+  long duration = pulseIn(ECHO, HIGH);
+  float distance = duration * 0.034 / 2;
+
+  return distance;
+}
+
+// 👀 Detect person
+bool detectPerson() {
+  int count = 0;
+
+  for (int i = 0; i < 5; i++) {
+    float d = getDistance();
+    if (d < 120 && d > 30) { // human zone
+      count++;
+    }
+    delay(50);
+  }
+
+  return (count >= 3);
+}
+
+// 🧍 Stability check
+bool isStable() {
+  float d1 = getDistance();
+  delay(200);
+  float d2 = getDistance();
+  delay(200);
+  float d3 = getDistance();
+
+  if (abs(d1 - d2) < 2 && abs(d2 - d3) < 2) {
+    return true;
+  }
+  return false;
+}
+
+void setup() {
+  Serial.begin(9600);
+
+  lcd.init();
+  lcd.backlight();
+
+  pinMode(TRIG, OUTPUT);
+  pinMode(ECHO, INPUT);
+
+  scale.begin(DOUT, CLK);
+  scale.set_scale();
+  scale.tare();
+  scale.set_scale(calibration_factor);
+}
+
+void loop() {
+
+  // 👀 Detect presence
+  personPresent = detectPerson();
+
+  if (!personPresent) {
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("Stand Here");
+    lcd.setCursor(0, 1);
+    lcd.print("Detecting...");
+    delay(500);
+    return;
+  }
+
+  // 🧍 Stand still phase
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print("Stand Still");
+  lcd.setCursor(0, 1);
+  lcd.print("Hold Position");
+
+  delay(2000);
+
+  // 🎯 Stability check
+  if (!isStable()) {
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("Too Much Move");
+    lcd.setCursor(0, 1);
+    lcd.print("Try Again");
+    delay(2000);
+    return;
+  }
+
+  // 📏 HEIGHT
+  float distance = getDistance();
+  float height = 0;
+
+  if (distance <= 130) {
+    height = total_height - distance;
+  } else {
+    height = 0;
+  }
+
+  // ⚖️ WEIGHT
+  float weight = scale.get_units(10);
+
+  // 🧮 BMI
+  float bmi = 0;
+  if (height > 0) {
+    float h_m = height / 100.0;
+    bmi = weight / (h_m * h_m);
+  }
+
+  // 📟 DISPLAY 1
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print("Height ");
+  lcd.print(height, 1);
+  lcd.print(" cm");
+
+  lcd.setCursor(0, 1);
+  lcd.print("Weight ");
+  lcd.print(weight, 1);
+  lcd.print(" kg");
+
+  delay(3000);
+
+  // 📟 DISPLAY 2
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print("BMI ");
+  lcd.print(bmi, 1);
+  lcd.print(" kg/m2");
+
+  lcd.setCursor(0, 1);
+
+  if (bmi < 18.5) {
+    lcd.print("Underweight");
+  } else if (bmi < 25) {
+    lcd.print("Normal");
+  } else if (bmi < 30) {
+    lcd.print("Overweight");
+  } else {
+    lcd.print("Obese");
+  }
+
+  delay(3000);
+}
