@@ -1,0 +1,155 @@
+#include <ESP8266WiFi.h>
+#include <ESP8266WebServer.h>
+#include <Wire.h>
+#include <LiquidCrystal_I2C.h>
+
+LiquidCrystal_I2C lcd(0x27,16,2);
+
+const char* ssid = "NoticeBoard";
+const char* password = "12345678";
+
+ESP8266WebServer server(80);
+
+#define RED D6
+#define GREEN D7
+#define BLUE D8
+#define BUZZER D5
+
+String notice = "Welcome";
+String priority = "green";
+
+void beep(int t)
+{
+  digitalWrite(BUZZER,HIGH);
+  delay(t);
+  digitalWrite(BUZZER,LOW);
+}
+
+void setColor(String p)
+{
+  digitalWrite(RED,LOW);
+  digitalWrite(GREEN,LOW);
+  digitalWrite(BLUE,LOW);
+
+  if(p=="green")
+    digitalWrite(GREEN,HIGH);
+
+  if(p=="red")
+    digitalWrite(RED,HIGH);
+
+  if(p=="yellow")
+  {
+    digitalWrite(RED,HIGH);
+    digitalWrite(GREEN,HIGH);
+  }
+}
+
+void updateLCD()
+{
+  lcd.clear();
+
+  if(notice.length()<=16)
+  {
+    lcd.setCursor(0,0);
+    lcd.print(notice);
+  }
+  else
+  {
+    lcd.setCursor(0,0);
+    lcd.print(notice.substring(0,16));
+    lcd.setCursor(0,1);
+    lcd.print(notice.substring(16,32));
+  }
+}
+
+void handleRoot()
+{
+String page =
+"<html>\
+<head>\
+<title>Notice Board</title>\
+<meta name='viewport' content='width=device-width, initial-scale=1'>\
+</head>\
+<body style='font-family:Arial;text-align:center;'>\
+<h2>WiFi Notice Board</h2>\
+<form action='/send'>\
+Notice:<br><br>\
+<input type='text' name='msg' style='width:250px'><br><br>\
+Priority:<br><br>\
+<select name='p'>\
+<option value='green'>General</option>\
+<option value='yellow'>Important</option>\
+<option value='red'>Emergency</option>\
+</select><br><br>\
+<input type='submit' value='Send Notice'>\
+</form>\
+</body>\
+</html>";
+
+server.send(200,"text/html",page);
+}
+
+void handleSend()
+{
+notice = server.arg("msg");
+priority = server.arg("p");
+
+updateLCD();
+setColor(priority);
+
+if(priority=="red")
+{
+  beep(300);
+  delay(100);
+  beep(300);
+  delay(100);
+  beep(300);
+}
+else
+{
+  beep(500);
+}
+
+server.send(200,"text/html",
+"<h2>Notice Sent Successfully!</h2><br><a href='/'>Go Back</a>");
+}
+
+void setup()
+{
+Serial.begin(115200);
+
+pinMode(RED,OUTPUT);
+pinMode(GREEN,OUTPUT);
+pinMode(BLUE,OUTPUT);
+pinMode(BUZZER,OUTPUT);
+
+digitalWrite(RED,LOW);
+digitalWrite(GREEN,LOW);
+digitalWrite(BLUE,LOW);
+digitalWrite(BUZZER,LOW);
+
+lcd.begin();
+lcd.backlight();
+lcd.print("Starting...");
+
+WiFi.softAP(ssid,password);
+
+lcd.clear();
+lcd.print("Connect WiFi");
+lcd.setCursor(0,1);
+lcd.print("192.168.4.1");
+
+server.on("/",handleRoot);
+server.on("/send",handleSend);
+
+server.begin();
+
+Serial.println();
+Serial.println("Access Point Started");
+Serial.println(WiFi.softAPIP());
+}
+
+void loop()
+{
+server.handleClient();
+}
