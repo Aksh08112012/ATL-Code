@@ -246,7 +246,7 @@ void sendNotice(){
   currentMessage = server.arg("msg");
   currentPriority = server.arg("p");
 
-  currentMessage.trim();
+  currentMessage.replace("  "," ");
 
   if(currentMessage==""){
 
@@ -374,8 +374,8 @@ void showLongWord(String word){
 
   longWordIndex++;
 
-  if(longWordIndex > text.length()-16)
-    longWordIndex = 0;
+  if(longWordIndex >= text.length()-16)
+  longWordIndex = 0;
 
 }
 
@@ -435,6 +435,19 @@ void updateDisplay(){
 
       String line1=buildLine(currentMessage,index);
       String line2=buildLine(currentMessage,index);
+  if(line1.startsWith("#LONGWORD#")){
+
+  showLongWord(line1.substring(10));
+  return;
+
+}
+
+if(line2.startsWith("#LONGWORD#")){
+
+  showLongWord(line2.substring(10));
+  return;
+
+}
 
       lcd.setCursor(0,0);
       lcd.print("                ");
@@ -506,7 +519,7 @@ void updateDisplay(){
 // ---------------- Setup ----------------
 void setup(){
 
-  Serial.begin(115200);
+  Serial.begin(9600);
 
   pinMode(RED,OUTPUT);
   pinMode(GREEN,OUTPUT);
@@ -554,7 +567,7 @@ void setup(){
   lcd.print(ssid);
 
   lcd.setCursor(0,1);
-  lcd.print(WiFi.softAPIP());
+  lcd.print(WiFi.softAPIP().toString());
 
   // Web Server
   server.on("/",handleRoot);
