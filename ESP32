@@ -102,7 +102,7 @@ color:green;
 
 <div class="card">
 
-<h2>📢 Smart Notice Board</h2>
+<h2>Smart Notice Board</h2>
 
 <input
 id="msg"
@@ -155,7 +155,7 @@ fetch("/send?msg="+encodeURIComponent(msg)+"&p="+p)
 
 .then(x=>{
 
-document.getElementById("status").innerHTML="✅ Notice Sent Successfully";
+document.getElementById("status").innerHTML="Notice Sent Successfully";
 
 document.getElementById("msg").value="";
 
