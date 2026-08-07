@@ -22,10 +22,27 @@ String currentPriority = "";
 unsigned long messageStart = 0;
 unsigned long lastScroll = 0;
 
+// ---------------- LCD Display Variables ----------------
+
+// Old variables
 int pageIndex = 0;
 int longWordIndex = 0;
 
+// New word-based scrolling
+int scrollPage = 0;
+
+// Stores all words of the current notice
+String words[50];
+
+// Number of words currently stored
+int wordCount = 0;
+
+// Prevents unnecessary LCD refresh
+String lastMessage = "";
+
+// LCD state
 bool noNoticeShown = false;
+bool showingLongWord = false;
 
 // ---------------- Web Page ----------------
 void handleRoot(){
@@ -142,7 +159,6 @@ let msg=document.getElementById("msg").value.trim();
 if(msg==""){
 
 alert("Please enter a notice.");
-
 return;
 
 }
@@ -156,7 +172,6 @@ fetch("/send?msg="+encodeURIComponent(msg)+"&p="+p)
 .then(x=>{
 
 document.getElementById("status").innerHTML="Notice Sent Successfully";
-
 document.getElementById("msg").value="";
 
 });
@@ -175,6 +190,85 @@ server.send(200,"text/html",page);
 
 }
 
+// ---------------- Receive Notice ----------------
+void sendNotice(){
+
+currentMessage = server.arg("msg");
+currentPriority = server.arg("p");
+
+// Remove leading/trailing spaces
+currentMessage.trim();
+
+// Remove repeated spaces
+while(currentMessage.indexOf("  ") != -1){
+
+currentMessage.replace("  "," ");
+
+}
+
+if(currentMessage==""){
+
+server.send(400,"text/plain","Empty Notice");
+return;
+
+}
+
+// Reset display engine
+messageStart = millis();
+lastScroll = 0;
+
+pageIndex = 0;
+scrollPage = 0;
+longWordIndex = 0;
+
+wordCount = 0;
+lastMessage = "";
+showingLongWord = false;
+noNoticeShown = false;
+
+// Split message into words
+int start = 0;
+
+while(start < currentMessage.length()){
+
+int space = currentMessage.indexOf(' ', start);
+
+if(space == -1)
+space = currentMessage.length();
+
+words[wordCount++] =
+currentMessage.substring(start, space);
+
+start = space + 1;
+
+}
+
+// Priority indication
+setPriorityColor(currentPriority);
+
+if(currentPriority=="green"){
+
+buzzGeneral();
+
+}
+else if(currentPriority=="yellow"){
+
+buzzImportant();
+
+}
+else{
+
+buzzEmergency();
+
+}
+
+// Clear LCD
+lcd.clear();
+
+server.send(200,"text/plain","Notice Sent");
+
+}
+
 // ---------------- RGB LED ----------------
 void setPriorityColor(String priority){
 
@@ -190,6 +284,8 @@ void setPriorityColor(String priority){
 
   else if(priority=="yellow"){
 
+    // Yellow = Red + Green
+    // (Brightness balancing can be added later if needed)
     digitalWrite(RED,HIGH);
     digitalWrite(GREEN,HIGH);
 
@@ -240,83 +336,24 @@ void buzzEmergency(){
 
 }
 
-// ---------------- Receive Notice ----------------
-void sendNotice(){
-
-  currentMessage = server.arg("msg");
-  currentPriority = server.arg("p");
-
-  currentMessage.replace("  "," ");
-
-  if(currentMessage==""){
-
-    server.send(400,"text/plain","Empty Notice");
-    return;
-
-  }
-
-  // Reset display engine
-  pageIndex = 0;
-  longWordIndex = 0;
-  lastScroll = 0;
-  messageStart = millis();
-
-  noNoticeShown = false;
-
-  // Priority indication
-  setPriorityColor(currentPriority);
-
-  if(currentPriority=="green"){
-
-    buzzGeneral();
-
-  }
-
-  else if(currentPriority=="yellow"){
-
-    buzzImportant();
-
-  }
-
-  else{
-
-    buzzEmergency();
-
-  }
-
-  lcd.setCursor(0,0);
-  lcd.print("                ");
-  lcd.setCursor(0,1);
-  lcd.print("                ");
-
-  server.send(200,"text/plain","Notice Sent");
-
-}
-
 // ---------------- Build One LCD Line ----------------
-String buildLine(String text, int &index){
-
-  while(index < text.length() && text[index] == ' ')
-    index++;
+String buildLine(int startWord, int &nextWord){
 
   String line = "";
+  nextWord = startWord;
 
-  while(index < text.length()){
+  while(nextWord < wordCount){
 
-    int nextSpace = text.indexOf(' ', index);
+    String word = words[nextWord];
 
-    if(nextSpace == -1)
-      nextSpace = text.length();
-
-    String word = text.substring(index, nextSpace);
-
-    // Very long word
+    // Long word handled separately
     if(word.length() > 16){
 
       if(line == "")
         return "#LONGWORD#" + word;
 
       break;
+
     }
 
     if(line == ""){
@@ -338,7 +375,7 @@ String buildLine(String text, int &index){
 
     }
 
-    index = nextSpace + 1;
+    nextWord++;
 
   }
 
@@ -349,14 +386,13 @@ String buildLine(String text, int &index){
 // ---------------- Scroll Very Long Word ----------------
 void showLongWord(String word){
 
+  showingLongWord = true;
+
   String text = "                ";
   text += word;
   text += "                ";
 
-  lcd.setCursor(0,0);
-  lcd.print("                ");
-  lcd.setCursor(0,1);
-  lcd.print("                ");
+  lcd.clear();
 
   lcd.setCursor(0,0);
   lcd.print(text.substring(longWordIndex,
@@ -366,36 +402,46 @@ void showLongWord(String word){
 
   if(longWordIndex+16 < text.length()){
 
-    lcd.print(text.substring(longWordIndex+16,
-             min(longWordIndex+32,
-             (int)text.length())));
+    lcd.print(
+      text.substring(
+        longWordIndex+16,
+        min(longWordIndex+32,
+        (int)text.length())
+      )
+    );
 
   }
 
   longWordIndex++;
 
-  if(longWordIndex >= text.length()-16)
-  longWordIndex = 0;
+  if(longWordIndex >= text.length()-16){
+
+    longWordIndex = 0;
+    showingLongWord = false;
+
+    // Move to next page after long word finishes
+    scrollPage++;
+
+    if(scrollPage >= wordCount)
+      scrollPage = 0;
+
+  }
 
 }
 
 // ---------------- LCD Display Engine ----------------
 void updateDisplay(){
 
-  static String lastMessage = "";
-
   // No notice
   if(currentMessage==""){
 
     if(!noNoticeShown){
 
-      lcd.setCursor(0,0);
-      lcd.print("                ");
-      lcd.setCursor(0,1);
-      lcd.print("                ");
+      lcd.clear();
 
       lcd.setCursor(0,0);
       lcd.print("No Notice");
+
       lcd.setCursor(0,1);
       lcd.print("Waiting...");
 
@@ -403,12 +449,11 @@ void updateDisplay(){
 
     }
 
-    lastMessage="";
     return;
 
   }
 
-  // Notice expired
+  // Notice expires after 60 seconds
   if(millis()-messageStart>=60000){
 
     currentMessage="";
@@ -426,33 +471,31 @@ void updateDisplay(){
 
   noNoticeShown=false;
 
-  // Fixed display if <=32 characters
+  // ---------- SHORT MESSAGE (<=32 chars) ----------
   if(currentMessage.length()<=32){
 
     if(lastMessage!=currentMessage){
 
-      int index=0;
+      int nextWord=0;
 
-      String line1=buildLine(currentMessage,index);
-      String line2=buildLine(currentMessage,index);
-  if(line1.startsWith("#LONGWORD#")){
+      String line1=buildLine(0,nextWord);
+      String line2=buildLine(nextWord,nextWord);
 
-  showLongWord(line1.substring(10));
-  return;
+      if(line1.startsWith("#LONGWORD#")){
 
-}
+        showLongWord(line1.substring(10));
+        return;
 
-if(line2.startsWith("#LONGWORD#")){
+      }
 
-  showLongWord(line2.substring(10));
-  return;
+      if(line2.startsWith("#LONGWORD#")){
 
-}
+        showLongWord(line2.substring(10));
+        return;
 
-      lcd.setCursor(0,0);
-      lcd.print("                ");
-      lcd.setCursor(0,1);
-      lcd.print("                ");
+      }
+
+      lcd.clear();
 
       lcd.setCursor(0,0);
       lcd.print(line1);
@@ -468,17 +511,20 @@ if(line2.startsWith("#LONGWORD#")){
 
   }
 
-  // Scroll speed
-  if(millis()-lastScroll<500)
+  // ---------- LONG MESSAGE (>32 chars) ----------
+
+  if(showingLongWord)
+    return;
+
+  if(millis()-lastScroll<1000)
     return;
 
   lastScroll=millis();
 
-  int index=pageIndex;
+  int nextWord;
 
-  String line1=buildLine(currentMessage,index);
+  String line1=buildLine(scrollPage,nextWord);
 
-  // Very long word
   if(line1.startsWith("#LONGWORD#")){
 
     showLongWord(line1.substring(10));
@@ -486,7 +532,7 @@ if(line2.startsWith("#LONGWORD#")){
 
   }
 
-  String line2=buildLine(currentMessage,index);
+  String line2=buildLine(nextWord,nextWord);
 
   if(line2.startsWith("#LONGWORD#")){
 
@@ -495,24 +541,19 @@ if(line2.startsWith("#LONGWORD#")){
 
   }
 
-  lcd.setCursor(0,0);
-  lcd.print("                ");
+  lcd.clear();
+
   lcd.setCursor(0,0);
   lcd.print(line1);
 
   lcd.setCursor(0,1);
-  lcd.print("                ");
-  lcd.setCursor(0,1);
   lcd.print(line2);
 
-  pageIndex=index;
+  // Move to next page (one word forward)
+  scrollPage++;
 
-  while(pageIndex<currentMessage.length() &&
-        currentMessage[pageIndex]==' ')
-    pageIndex++;
-
-  if(pageIndex>=currentMessage.length())
-    pageIndex=0;
+  if(scrollPage>=wordCount)
+    scrollPage=0;
 
 }
 
@@ -521,6 +562,7 @@ void setup(){
 
   Serial.begin(9600);
 
+  // ---------------- Pins ----------------
   pinMode(RED,OUTPUT);
   pinMode(GREEN,OUTPUT);
   pinMode(BLUE,OUTPUT);
@@ -531,10 +573,11 @@ void setup(){
   digitalWrite(BLUE,LOW);
   digitalWrite(BUZZER,LOW);
 
+  // ---------------- LCD ----------------
   lcd.begin();
   lcd.backlight();
 
-  // Welcome Screen
+  lcd.clear();
   lcd.setCursor(0,0);
   lcd.print("Smart Notice");
 
@@ -543,25 +586,17 @@ void setup(){
 
   delay(2000);
 
-  // Starting
-  lcd.setCursor(0,0);
-  lcd.print("                ");
-  lcd.setCursor(0,1);
-  lcd.print("                ");
-
+  lcd.clear();
   lcd.setCursor(0,0);
   lcd.print("Starting...");
+
   delay(1000);
 
-  // Create Wi-Fi AP
+  // ---------------- WiFi AP ----------------
   WiFi.mode(WIFI_AP);
   WiFi.softAP(ssid,password);
 
-  // Show Wi-Fi Details
-  lcd.setCursor(0,0);
-  lcd.print("                ");
-  lcd.setCursor(0,1);
-  lcd.print("                ");
+  lcd.clear();
 
   lcd.setCursor(0,0);
   lcd.print(ssid);
@@ -569,32 +604,57 @@ void setup(){
   lcd.setCursor(0,1);
   lcd.print(WiFi.softAPIP().toString());
 
-  // Web Server
+  // ---------------- Web Server ----------------
   server.on("/",handleRoot);
   server.on("/send",sendNotice);
 
   server.begin();
 
-  // Serial Monitor
+  // ---------------- Initialize Variables ----------------
+  currentMessage = "";
+  currentPriority = "";
+
+  messageStart = 0;
+  lastScroll = 0;
+
+  pageIndex = 0;
+  scrollPage = 0;
+  longWordIndex = 0;
+
+  wordCount = 0;
+
+  lastMessage = "";
+
+  showingLongWord = false;
+  noNoticeShown = true;
+
+  // Clear word array
+  for(int i=0;i<50;i++){
+
+    words[i]="";
+
+  }
+
+  // ---------------- Serial Monitor ----------------
   Serial.println();
   Serial.println("==================================");
   Serial.println(" Smart Notice Board");
   Serial.println("==================================");
   Serial.print("SSID : ");
   Serial.println(ssid);
+
   Serial.print("PASS : ");
   Serial.println(password);
+
   Serial.print("IP   : ");
   Serial.println(WiFi.softAPIP());
+
   Serial.println("==================================");
 
   delay(3000);
 
-  // Ready Screen
-  lcd.setCursor(0,0);
-  lcd.print("                ");
-  lcd.setCursor(0,1);
-  lcd.print("                ");
+  // ---------------- Ready Screen ----------------
+  lcd.clear();
 
   lcd.setCursor(0,0);
   lcd.print("No Notice");
@@ -602,15 +662,15 @@ void setup(){
   lcd.setCursor(0,1);
   lcd.print("Waiting...");
 
-  noNoticeShown = true;
-
 }
 
 // ---------------- Main Loop ----------------
 void loop(){
 
+  // Handle website requests
   server.handleClient();
 
+  // Update LCD display
   updateDisplay();
 
 }
