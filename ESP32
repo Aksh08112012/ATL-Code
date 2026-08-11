@@ -24,12 +24,12 @@ unsigned long lastScroll = 0;
 
 // ---------------- LCD Display Variables ----------------
 
-// Old variables
-int pageIndex = 0;
-int longWordIndex = 0;
-
-// New word-based scrolling
+// Word-based scrolling
 int scrollPage = 0;
+
+// Long-word scrolling
+int longWordIndex = 0;
+unsigned long lastLongWordScroll = 0;
 
 // Stores all words of the current notice
 String words[50];
@@ -132,7 +132,7 @@ placeholder="Enter Notice">
 General
 </option>
 
-<option value="yellow">
+<option value="blue">
 Important
 </option>
 
@@ -193,79 +193,88 @@ server.send(200,"text/html",page);
 // ---------------- Receive Notice ----------------
 void sendNotice(){
 
-currentMessage = server.arg("msg");
-currentPriority = server.arg("p");
+  currentMessage = server.arg("msg");
+  currentPriority = server.arg("p");
 
-// Remove leading/trailing spaces
-currentMessage.trim();
+  // Remove leading/trailing spaces
+  currentMessage.trim();
 
-// Remove repeated spaces
-while(currentMessage.indexOf("  ") != -1){
+  // Remove repeated spaces
+  while(currentMessage.indexOf("  ") != -1){
 
-currentMessage.replace("  "," ");
+    currentMessage.replace("  "," ");
 
-}
+  }
 
-if(currentMessage==""){
+  if(currentMessage==""){
 
-server.send(400,"text/plain","Empty Notice");
-return;
+    server.send(400,"text/plain","Empty Notice");
+    return;
 
-}
+  }
 
-// Reset display engine
-messageStart = millis();
-lastScroll = 0;
+  // Reset display engine
+  messageStart = millis();
+  lastScroll = 0;
 
-pageIndex = 0;
-scrollPage = 0;
-longWordIndex = 0;
+  scrollPage = 0;
+  longWordIndex = 0;
+  lastLongWordScroll = 0;
 
-wordCount = 0;
-lastMessage = "";
-showingLongWord = false;
-noNoticeShown = false;
+  wordCount = 0;
+  lastMessage = "";
+  showingLongWord = false;
+  noNoticeShown = false;
 
-// Split message into words
-int start = 0;
+  // Clear old words
+  for(int i=0;i<50;i++){
 
-while(start < currentMessage.length()){
+    words[i]="";
 
-int space = currentMessage.indexOf(' ', start);
+  }
 
-if(space == -1)
-space = currentMessage.length();
+  // Split message into words
+  int start = 0;
 
-words[wordCount++] =
-currentMessage.substring(start, space);
+  while(start < currentMessage.length() && wordCount < 50){
 
-start = space + 1;
+    int space = currentMessage.indexOf(' ', start);
 
-}
+    if(space == -1)
+      space = currentMessage.length();
 
-// Priority indication
-setPriorityColor(currentPriority);
+    words[wordCount++] =
+      currentMessage.substring(start, space);
 
-if(currentPriority=="green"){
+    start = space + 1;
 
-buzzGeneral();
+  }
 
-}
-else if(currentPriority=="yellow"){
+  // Priority indication
+  setPriorityColor(currentPriority);
 
-buzzImportant();
+  if(currentPriority=="green"){
 
-}
-else{
+    buzzGeneral();
 
-buzzEmergency();
+  }
 
-}
+  else if(currentPriority=="blue"){
 
-// Clear LCD
-lcd.clear();
+    buzzImportant();
 
-server.send(200,"text/plain","Notice Sent");
+  }
+
+  else{
+
+    buzzEmergency();
+
+  }
+
+  // Clear LCD
+  lcd.clear();
+
+  server.send(200,"text/plain","Notice Sent");
 
 }
 
@@ -282,12 +291,9 @@ void setPriorityColor(String priority){
 
   }
 
-  else if(priority=="yellow"){
+  else if(priority=="blue"){
 
-    // Yellow = Red + Green
-    // (Brightness balancing can be added later if needed)
-    digitalWrite(RED,HIGH);
-    digitalWrite(GREEN,HIGH);
+    digitalWrite(BLUE,HIGH);
 
   }
 
@@ -386,40 +392,74 @@ String buildLine(int startWord, int &nextWord){
 // ---------------- Scroll Very Long Word ----------------
 void showLongWord(String word){
 
+  // Scroll every 250 ms
+  if(millis() - lastLongWordScroll < 250)
+    return;
+
+  lastLongWordScroll = millis();
+
   showingLongWord = true;
 
+  // Spaces before and after allow the word
+  // to completely enter and leave the display
   String text = "                ";
   text += word;
   text += "                ";
 
-  lcd.clear();
+  int totalLength = text.length();
 
+  // Clear both LCD lines without lcd.clear()
   lcd.setCursor(0,0);
-  lcd.print(text.substring(longWordIndex,
-                           longWordIndex+16));
+  lcd.print("                ");
 
   lcd.setCursor(0,1);
+  lcd.print("                ");
 
-  if(longWordIndex+16 < text.length()){
+  // Always start the long word on LINE 1
+  lcd.setCursor(0,0);
+
+  int firstEnd = min(
+    longWordIndex + 16,
+    totalLength
+  );
+
+  lcd.print(
+    text.substring(
+      longWordIndex,
+      firstEnd
+    )
+  );
+
+  // Overflow continues onto LINE 2
+  if(longWordIndex + 16 < totalLength){
+
+    lcd.setCursor(0,1);
+
+    int secondEnd = min(
+      longWordIndex + 32,
+      totalLength
+    );
 
     lcd.print(
       text.substring(
-        longWordIndex+16,
-        min(longWordIndex+32,
-        (int)text.length())
+        longWordIndex + 16,
+        secondEnd
       )
     );
 
   }
 
+  // Move one character
   longWordIndex++;
 
-  if(longWordIndex >= text.length()-16){
+  // Word has completely scrolled through
+  if(longWordIndex >= totalLength - 16){
 
     longWordIndex = 0;
+
     showingLongWord = false;
 
-    // Move to next page after long word finishes
+    // Continue with the next word
     scrollPage++;
 
     if(scrollPage >= wordCount)
@@ -432,7 +472,7 @@ void showLongWord(String word){
 // ---------------- LCD Display Engine ----------------
 void updateDisplay(){
 
-  // No notice
+  // ---------------- No Notice ----------------
   if(currentMessage==""){
 
     if(!noNoticeShown){
@@ -453,7 +493,7 @@ void updateDisplay(){
 
   }
 
-  // Notice expires after 60 seconds
+  // ---------------- Notice Expiry ----------------
   if(millis()-messageStart>=60000){
 
     currentMessage="";
@@ -481,6 +521,7 @@ void updateDisplay(){
       String line1=buildLine(0,nextWord);
       String line2=buildLine(nextWord,nextWord);
 
+      // Long word in first line
       if(line1.startsWith("#LONGWORD#")){
 
         showLongWord(line1.substring(10));
@@ -488,6 +529,7 @@ void updateDisplay(){
 
       }
 
+      // Long word in second line
       if(line2.startsWith("#LONGWORD#")){
 
         showLongWord(line2.substring(10));
@@ -513,9 +555,11 @@ void updateDisplay(){
 
   // ---------- LONG MESSAGE (>32 chars) ----------
 
+  // Long-word scrolling is handled separately
   if(showingLongWord)
     return;
 
+  // Change page every 1 second
   if(millis()-lastScroll<1000)
     return;
 
@@ -523,8 +567,10 @@ void updateDisplay(){
 
   int nextWord;
 
+  // Build first LCD line
   String line1=buildLine(scrollPage,nextWord);
 
+  // Long word encountered
   if(line1.startsWith("#LONGWORD#")){
 
     showLongWord(line1.substring(10));
@@ -532,8 +578,10 @@ void updateDisplay(){
 
   }
 
+  // Build second LCD line
   String line2=buildLine(nextWord,nextWord);
 
+  // Long word encountered
   if(line2.startsWith("#LONGWORD#")){
 
     showLongWord(line2.substring(10));
@@ -541,7 +589,12 @@ void updateDisplay(){
 
   }
 
-  lcd.clear();
+  // Update LCD without changing scrolling logic
+  lcd.setCursor(0,0);
+  lcd.print("                ");
+
+  lcd.setCursor(0,1);
+  lcd.print("                ");
 
   lcd.setCursor(0,0);
   lcd.print(line1);
@@ -549,7 +602,7 @@ void updateDisplay(){
   lcd.setCursor(0,1);
   lcd.print(line2);
 
-  // Move to next page (one word forward)
+  // Move forward by one word
   scrollPage++;
 
   if(scrollPage>=wordCount)
@@ -578,6 +631,7 @@ void setup(){
   lcd.backlight();
 
   lcd.clear();
+
   lcd.setCursor(0,0);
   lcd.print("Smart Notice");
 
@@ -587,6 +641,7 @@ void setup(){
   delay(2000);
 
   lcd.clear();
+
   lcd.setCursor(0,0);
   lcd.print("Starting...");
 
@@ -617,9 +672,9 @@ void setup(){
   messageStart = 0;
   lastScroll = 0;
 
-  pageIndex = 0;
   scrollPage = 0;
   longWordIndex = 0;
+  lastLongWordScroll = 0;
 
   wordCount = 0;
 
@@ -640,6 +695,7 @@ void setup(){
   Serial.println("==================================");
   Serial.println(" Smart Notice Board");
   Serial.println("==================================");
+
   Serial.print("SSID : ");
   Serial.println(ssid);
 
