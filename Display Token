@@ -1,0 +1,13 @@
+(async () => {
+  const { getMessaging, getToken } =
+    await import("https://www.gstatic.com/firebasejs/13.1.0/firebase-messaging.js");
+  const app = (await import("https://www.gstatic.com/firebasejs/13.1.0/firebase-app.js"))
+    .getApps()[0];
+  const messaging = getMessaging(app);
+  const registration = await navigator.serviceWorker.ready;
+  const token = await getToken(messaging, {
+    vapidKey: "BF1c-zZvdtsztAhQ1wJfVOK7NWLqfkcy7DfP0m0fj6Gje3WKWz4awcvZiYNvyejIg_z0ca7EyG7_50OaQkPvJAM",
+    serviceWorkerRegistration: registration
+  });
+  console.log(token);
+})();
